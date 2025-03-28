@@ -1,0 +1,34 @@
+#!/bin/sh
+
+#$1 and $2 should be passed when calling the script. 
+#$1 is the vcf file while $2 is the output file
+
+#Extract novel variants from the data, those that have no rsid in the dbSNPs (annotated by '.' in chr position).
+#bcftools view -n $1 -Oz -o $2novel_variants.vcf.gz
+#tabix -p vcf $2novel_variants.vcf.gz
+
+bcftools filter -i 'ID!=@samplestoremove.list && MAF>0.01 && QUAL>30 && FMT/GQ>10 && FILTER="PASS"' ~/RawData/Fgrp02/GRCh38/20240124_novel_genotypes.vcf.gz -Oz -o $2novel_variants_common.vcf.gz
+tabix -p vcf $2novel_variants_common.vcf.gz
+
+#Annotate the common novel variants (MAF>0.01) using SnpEff
+##java -Xmx20g -jar ~/Softwares/snpEff/snpEff.jar -v hg38 $2novel_variants_common.vcf.gz > $2novel_variants_common.snpEff.vcf
+##bgzip -c $2novel_variants_common.snpEff.vcf > $2novel_variants_common.snpEff.vcf.gz
+
+#Filtered the common novel variants with AF>=0.9 to identify alleles that are highly frequent in the Filipino population
+bcftools view -i 'AF>=0.99' $2novel_variants_common.annot.vcf.gz -Oz -o $2novel_variants_common_af99.vcf.gz
+
+#Annotate using SIFT, single transcipt only
+mkdir $2novel_variants_common.sift
+bgzip -d -k $2novel_variants_common.vcf.gz > $2novel_variants_common.vcf
+java -jar ~/Softwares/SIFT4G_Annotator.jar -c -i $2novel_variants_common.vcf -d ../resources/GRCh38.83.chr/ -r $2novel_variants_common.sift
+
+sed -n '1p;/DELETERIOUS/p' $2novel_variants_common.sift/novel_variants_common_SIFTannotations.xls > $2novel_variants_common_sift_deleterious.txt
+sed -n '1p;/novel/p' $2novel_variants_common_sift_deleterious.txt > $2novel_variants_common_sift_deleterious_novel.txt
+sed -n '1p;/novel/d' $2novel_variants_common_sift_deleterious.txt > $2novel_variants_common_sift_deleterious_dbSNP.txt
+
+count_del=$(grep -c "DELETERIOUS" $2novel_variants_common_sift_deleterious.txt)
+count_del_novel=$(grep -c "novel" $2novel_variants_common_sift_deleterious_novel.txt)
+count_del_dbSNP=$(grep -c -v "novel" $2novel_variants_common_sift_deleterious_dbSNP.txt)
+
+echo "The input callset has $count_del deleterious variant, of which $count_del_novel are found to be novel to the dataset and $count_del_dbSNP are annotated in dbSNP database."
+
